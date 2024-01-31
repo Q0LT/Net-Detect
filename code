@@ -1,0 +1,121 @@
+import argparse
+import ipaddress
+import logging
+import nmap
+import subprocess
+import re
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def get_os_choice():
+    print("Please specify your operating system:")
+    print("1: Windows")
+    print("2: Linux")
+    print("3: macOS")
+    choice = input("Enter the number of your operating system: ")
+    return choice
+
+def get_mac_address(ip, os_choice):
+    try:
+        output = subprocess.check_output(["arp", "-a", ip], stderr=subprocess.STDOUT).decode('utf-8', 'ignore')
+
+        if os_choice == "1":  # Windows
+            pattern = r"({})\s+([\w-]+)".format(re.escape(ip))
+        elif os_choice == "2":  # Linux
+            pattern = r"({})\s+ether\s+([\w:]+)".format(re.escape(ip))
+        elif os_choice == "3":  # macOS
+            pattern = r"({})\s+at\s+([\w:]+)".format(re.escape(ip))
+        else:
+            return "OS choice not recognized"
+
+        match = re.search(pattern, output)
+        if match:
+            return match.group(2)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to get MAC address for {ip}: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error while getting MAC address for {ip}: {e}")
+    return "Not found"
+
+def validate_cidr(cidr):
+    try:
+        ipaddress.ip_network(cidr)
+        return True
+    except ValueError:
+        return False
+
+def scan_network(cidr):
+    nm = nmap.PortScanner()
+    try:
+        nm.scan(hosts=cidr, arguments=f"-sn")
+    except nmap.PortScannerError as e:
+        logging.error(f"Scan error: {e}")
+        return []
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        return []
+
+    active_hosts = [host for host in nm.all_hosts() if nm[host].state() == 'up']
+    return active_hosts
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Scan a network using NMAP, retrieves devices and MAC addresses")
+    parser.add_argument("-r", "--range", dest="host", type=str, required=True, help="Use CIDR notation (ex. '192.168.1.0/24')")
+    return parser.parse_args()
+
+if __name__ == "__main__":
+    print(r"""
+.__   __.  _______ .___________. _______   _______ .___________. _______   ______ .___________.
+|  \ |  | |   ____||           ||       \ |   ____||           ||   ____| /      ||           |
+|   \|  | |  |__   `---|  |----`|  .--.  ||  |__   `---|  |----`|  |__   |  ,----'`---|  |----`
+|  . `  | |   __|      |  |     |  |  |  ||   __|      |  |     |   __|  |  |         |  |     
+|  |\   | |  |____     |  |     |  '--'  ||  |____     |  |     |  |____ |  `----.    |  |     
+|__| \__| |_______|    |__|     |_______/ |_______|    |__|     |_______| \______|    |__|     
+                              
+
+NetDetect https://github.com/Q0LT
+Scan a network using NMAP, retrieve devices and MAC addresses.
+Usage: python netdetect.py -r <CIDR_range> 
+
+Options:
+  -r, --range       IP address range, Use CIDR (ex. '192.168.1.0/24').
+  Choose operating system, 1. Windows, 2. Linux, or 3. macOS.
+""")
+    os_choice = get_os_choice()
+
+    args = parse_arguments()
+    network_cidr = args.host
+
+    if not validate_cidr(network_cidr):
+        logging.error("Invalid CIDR notation. Please check the range and try again.")
+        exit(1)
+
+    active_hosts = scan_network(network_cidr)
+    
+    with open('scan_results.txt', 'w') as file:
+        print("Scanning IP addresses in the range:", network_cidr)
+        file.write("Scanning IP addresses in the range: {}\n".format(network_cidr))
+
+        #for ip in ipaddress.IPv4Network(network_cidr, strict=False).hosts():
+            #print(ip)
+            #file.write(str(ip) + "\n")
+
+        print("\nDevices found on the network:")
+        file.write("\nDevices found on the network:\n")
+
+        if not active_hosts:
+            print("No devices found.")
+            file.write("No devices found.\n")
+
+        for host in active_hosts:
+            mac_address = get_mac_address(host, os_choice)
+            if mac_address:
+                output = f"IP: {host}\t MAC Address: {mac_address}"
+                print(output)
+                file.write(output + "\n")
+            else:
+                output = f"IP: {host}\t MAC Address: Not found"
+                print(output)
+                file.write(output + "\n")
+
+    logging.info("Scan results have been saved to 'scan_results.txt'")
