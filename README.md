@@ -1,4 +1,4 @@
 # Net-Detect
 
 # Execute
-python netdetect.py -r CIDR Range -p port
+python netdetect -r CIDR Range
